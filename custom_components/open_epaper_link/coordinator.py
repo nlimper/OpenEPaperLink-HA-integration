@@ -561,7 +561,9 @@ class Hub:
 
         Parses log messages for specific events that require action:
         - Block transfer requests: Updates the block_requests counter
-        - Transfer completion: Triggers image update notification
+
+        Image previews are refreshed from the tag update that follows a
+        transfer (hash change), see _process_tag_data.
 
         Args:
             log_msg: Raw log message string from the AP
@@ -577,14 +579,6 @@ class Hub:
                     self._data[tag_mac]["block_requests"] = block_requests
                     # Notify of update
                     async_dispatcher_send(self.hass, f"{SIGNAL_TAG_UPDATE}_{tag_mac}")
-        if "reports xfer complete" in log_msg:
-            # Extract MAC address from block request message
-            parts = log_msg.split()
-            if len(parts) > 0:
-                tag_mac = parts[0].upper()
-                if tag_mac in self._data:
-                    # Notify of update
-                    async_dispatcher_send(self.hass, f"{SIGNAL_TAG_IMAGE_UPDATE}_{tag_mac}", True)
 
     async def _process_tag_data(self, tag_mac: str, tag_data: dict, is_initial_load: bool = False) -> bool:
         """Process tag data and update internal state.
@@ -725,6 +719,12 @@ class Hub:
 
         # Fire state update event
         async_dispatcher_send(self.hass, f"{SIGNAL_TAG_UPDATE}_{tag_mac}")
+
+        # Refresh the image preview when the tag got new content. The AP sends
+        # this tag update after it replaced /current/<mac>.raw; its "reports xfer
+        # complete" log message comes before that, so it would fetch the old image.
+        if not is_initial_load and existing_data and hashv != existing_data.get("hash"):
+            async_dispatcher_send(self.hass, f"{SIGNAL_TAG_IMAGE_UPDATE}_{tag_mac}", True)
 
         # Handle wakeup event if needed and not initial load
         wakeup_reason = tag_data.get("wakeupReason")
