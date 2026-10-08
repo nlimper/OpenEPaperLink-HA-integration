@@ -293,7 +293,7 @@ async def async_setup_services(hass: HomeAssistant) -> None:
             # Upload image
             dither = int(service.data.get("dither", DITHER_DEFAULT))
 
-            refresh_type = int(service.data.get("refresh_type", 0))
+            refresh_type = service.data.get("refresh_type")
 
             if is_ble:
                 from .util import is_bluetooth_available
@@ -312,8 +312,11 @@ async def async_setup_services(hass: HomeAssistant) -> None:
             else:
                 # Map refresh_type to AP's lut parameter
                 # 0→1 (full), 1→3 (fast), 2→2 (fast no-reds), 3→0 (no-repeats)
+                # Without refresh_type no lut is sent, so the AP keeps the tag's own setting
                 ap_lut_mapping = {0: 1, 1: 3, 2: 2, 3: 0}
-                ap_lut = ap_lut_mapping.get(refresh_type, 1)  # Default to 1 (full) if invalid
+                ap_lut = None
+                if refresh_type is not None:
+                    ap_lut = ap_lut_mapping.get(int(refresh_type), 1)  # Default to 1 (full) if invalid
                 await hub_upload_queue.add_to_queue(
                     upload_to_hub, hub, entity_id, image, dither,
                     service.data.get("ttl", 60),

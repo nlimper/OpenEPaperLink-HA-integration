@@ -76,9 +76,10 @@ drawcustom:
         
         - Partial2: Alternative partial mode.
         
+        Leave unset to keep the refresh setting configured for the tag in the AP.
+
         Note: ATC BLE tags do not support this parameter.
       required: false
-      default: "0"
       selector:
         select:
           options:

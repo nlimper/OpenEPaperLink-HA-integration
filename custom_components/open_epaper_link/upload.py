@@ -220,7 +220,7 @@ class UploadQueueHandler:
 
 
 async def upload_to_hub(hub, entity_id: str, img: Image.Image, dither: int, ttl: int,
-                       preload_type: int = 0, preload_lut: int = 0, lut: int = 1) -> None:
+                       preload_type: int = 0, preload_lut: int = 0, lut: int | None = None) -> None:
     """Upload image to tag through AP.
 
     Sends an image to the AP for display on a specific tag using
@@ -237,7 +237,8 @@ async def upload_to_hub(hub, entity_id: str, img: Image.Image, dither: int, ttl:
         ttl: Time-to-live in seconds
         preload_type: Type for image preloading (0=disabled)
         preload_lut: Look-up table for preloading
-        lut: Display refresh LUT mode (1=full, 3=fast, 2=fast no-reds, 0=no-repeats)
+        lut: Display refresh LUT mode (1=full, 3=fast, 2=fast no-reds, 0=no-repeats),
+            or None to keep the tag's LUT setting on the AP
     Raises:
         HomeAssistantError: If upload fails or times out
     """
@@ -245,7 +246,7 @@ async def upload_to_hub(hub, entity_id: str, img: Image.Image, dither: int, ttl:
     mac = entity_id.split(".")[1].upper()
 
     _LOGGER.debug("Preparing upload for %s (MAC: %s)", entity_id, mac)
-    _LOGGER.debug("Upload parameters: dither=%d, ttl=%d, preload_type=%d, preload_lut=%d, lut=%d",
+    _LOGGER.debug("Upload parameters: dither=%d, ttl=%d, preload_type=%d, preload_lut=%d, lut=%s",
                   dither, ttl, preload_type, preload_lut, lut)
 
     # Convert TTL fom seconds to minutes for the AP
@@ -263,9 +264,11 @@ async def upload_to_hub(hub, entity_id: str, img: Image.Image, dither: int, ttl:
                 'contentmode': "25",
                 'dither': str(dither),
                 'ttl': str(ttl_minutes),
-                'lut': str(lut),
                 'image': ('image.jpg', jpeg_bytes, 'image/jpeg'),
             }
+
+            if lut is not None:
+                fields['lut'] = str(lut)
 
             if preload_type > 0:
                 fields.update({
