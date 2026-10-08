@@ -247,7 +247,7 @@ class RebootAPButton(OpenEPaperLinkAPEntity, ButtonEntity):
 
 
 class RefreshTagTypesButton(OpenEPaperLinkAPEntity, ButtonEntity):
-    """Button to manually refresh tag types from GitHub."""
+    """Button to manually refresh tag types from the AP (or GitHub without an AP)."""
 
     def __init__(self, hass: HomeAssistant, hub) -> None:
         """Initialize the button entity."""
@@ -260,12 +260,12 @@ class RefreshTagTypesButton(OpenEPaperLinkAPEntity, ButtonEntity):
     async def async_press(self) -> None:
         """Handle the button press.
 
-        Triggers a refresh of tag type definitions from GitHub
+        Triggers a refresh of tag type definitions from the AP (or GitHub)
         and displays a notification with the result.
 
         The refresh process:
 
-        1. Clears the cache timestamp to force a new GitHub fetch
+        1. Clears the cache timestamp to force a new fetch
         2. Calls the tag types manager to load the latest definitions
         3. Shows a notification with the number of tag types loaded
         """
@@ -274,7 +274,7 @@ class RefreshTagTypesButton(OpenEPaperLinkAPEntity, ButtonEntity):
         manager._last_update = None
         await manager.ensure_types_loaded()
         tag_types_len = len(manager.get_all_types())
-        message = f"Successfully refreshed {tag_types_len} tag types from GitHub"
+        message = f"Successfully refreshed {tag_types_len} tag types"
         await self.hass.services.async_call(
             "persistent_notification",
             "create",

@@ -461,10 +461,10 @@
       "message": "Error turning off LED: {error}."
     },
     "tagtypes_load_failed": {
-      "message": "Failed to load tag type definitions. No stored data available. Check network connectivity or GitHub access."
+      "message": "Failed to load tag type definitions. No stored data available. Check that the AP is reachable (or GitHub access, without an AP)."
     },
     "tagtypes_refresh_failed": {
-      "message": "Failed to refresh tag type definitions. Check network connectivity or GitHub access."
+      "message": "Failed to refresh tag type definitions. Check that the AP is reachable (or GitHub access, without an AP)."
     },
     "no_hub_configured": {
       "message": "No AP hub configured. Only BLE devices found."

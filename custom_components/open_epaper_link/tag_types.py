@@ -9,6 +9,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import Any, Dict, Optional, Tuple
 
+from homeassistant.const import CONF_HOST
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import storage
@@ -18,7 +19,11 @@ _LOGGER = logging.getLogger(__name__)
 
 GITHUB_API_URL = "https://api.github.com/repos/OpenEPaperLink/OpenEPaperLink/contents/resources/tagtypes"
 GITHUB_RAW_URL = "https://raw.githubusercontent.com/OpenEPaperLink/OpenEPaperLink/master/resources/tagtypes"
+AP_TAGTYPES_LIST_URL = "http://{host}/edit?list=/tagtypes"
+AP_TAGTYPE_URL = "http://{host}/tagtypes/{name}"
+REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=30)
 CACHE_DURATION = timedelta(hours=48)  # Cache tag definitions for 48 hours
+UNKNOWN_TYPE_REFRESH_INTERVAL = timedelta(minutes=10)  # Min. time between refreshes for unknown types
 STORAGE_VERSION = 1
 STORAGE_KEY = "open_epaper_link_tagtypes"
 LEGACY_TAG_TYPES_FILE = "open_epaper_link_tagtypes.json"
@@ -158,12 +163,14 @@ class TagType:
 
 
 class TagTypesManager:
-    """Manages tag type definitions fetched from GitHub.
+    """Manages tag type definitions fetched from the AP or GitHub.
 
-    Handles loading, caching, and refreshing tag type definitions from
-    the OpenEPaperLink GitHub repository. Provides local storage to
-    avoid frequent network requests and fallback definitions for
-    when GitHub is unreachable.
+    Handles loading, caching, and refreshing tag type definitions. When an
+    AP is configured, the definitions are read from the AP itself (its
+    /tagtypes directory), so tag types that only exist on the AP are known
+    too. Without an AP (BLE-only setups) they come from the OpenEPaperLink
+    GitHub repository. Provides local storage to avoid frequent network
+    requests.
 
     The manager is implemented as a quasi-singleton through the
     get_tag_types_manager function to ensure consistent state
@@ -182,6 +189,8 @@ class TagTypesManager:
         self._hass = hass
         self._tag_types: Dict[int, TagType] = {}
         self._last_update: Optional[datetime] = None
+        self._last_unknown_refresh: Optional[datetime] = None
+        self._source: Optional[str] = None
         self._lock = asyncio.Lock()
         self._legacy_storage_file = self._hass.config.path(LEGACY_TAG_TYPES_FILE)
         self._store = storage.Store(
@@ -195,9 +204,11 @@ class TagTypesManager:
         """Load stored tag type definitions from disk.
 
         Attempts to load previously cached tag type definitions from the
-        Home Assistant storage helper. If valid data is found, it's used to
-        populate the manager's state. Otherwise, a fresh fetch from GitHub
-        is initiated and the legacy file in the config directory is removed.
+        Home Assistant storage helper. If valid data is found and it was
+        fetched from the current source (AP or GitHub), it's used to populate
+        the manager's state. Otherwise, a fresh fetch is initiated and the
+        legacy file in the config directory is removed. If that fetch fails,
+        the stored definitions are used anyway.
 
         This helps reduce network requests and provides offline operation capability.
         """
@@ -208,16 +219,35 @@ class TagTypesManager:
             _LOGGER.error("Error loading tag types from storage: %s", err, exc_info=True)
 
         if stored_data:
-            if stored_data.get("version") == STORAGE_VERSION:
+            if stored_data.get("version") != STORAGE_VERSION:
+                _LOGGER.warning("Stored tag types version mismatch, refetching fresh definitions")
+                stored_data = None
+            elif stored_data.get("source") == self._current_source():
                 await self._load_from_payload(stored_data)
                 return
-            _LOGGER.warning("Stored tag types version mismatch, refetching fresh definitions")
+            else:
+                _LOGGER.info(
+                    "Stored tag types come from %s instead of %s, refetching",
+                    stored_data.get("source", "github"),
+                    self._current_source(),
+                )
 
         fetch_success = await self._fetch_tag_types()
-        if fetch_success:
-            await self._cleanup_legacy_file()
-        else:
-            await self._cleanup_legacy_file()
+        if not fetch_success and stored_data:
+            await self._load_from_payload(stored_data)
+        await self._cleanup_legacy_file()
+
+    def _get_ap_host(self) -> str | None:
+        """Return the host of the configured AP, or None for BLE-only setups."""
+        for entry in self._hass.config_entries.async_entries(DOMAIN):
+            if CONF_HOST in entry.data:
+                return entry.data[CONF_HOST]
+        return None
+
+    def _current_source(self) -> str:
+        """Return the source tag types should be fetched from."""
+        ap_host = self._get_ap_host()
+        return f"ap:{ap_host}" if ap_host else "github"
 
     async def _save_to_store(self) -> None:
         """Persist tag types using Home Assistant storage helper."""
@@ -226,6 +256,7 @@ class TagTypesManager:
 
         data = {
             "version": STORAGE_VERSION,
+            "source": self._source,
             "last_update": self._last_update.isoformat(),
             "tag_types": {
                 str(type_id): tag_type.to_dict()
@@ -247,6 +278,7 @@ class TagTypesManager:
             )
         except (TypeError, ValueError):
             self._last_update = datetime.now()
+        self._source = stored_data.get("source", "github")
 
         self._tag_types = {}
         for type_id_str, type_data in stored_data.get("tag_types", {}).items():
@@ -281,7 +313,8 @@ class TagTypesManager:
         """Ensure tag types are loaded and not too old.
 
         Checks if tag types are already loaded and recent enough.
-        If not loaded or older than CACHE_DURATION, initiates a refresh from GitHub.
+        If not loaded or older than CACHE_DURATION, initiates a refresh from the AP
+        (or from GitHub when no AP is configured).
 
         This is the primary method that should be called before accessing
         tag type information to ensure data availability.
@@ -313,55 +346,24 @@ class TagTypesManager:
                     )
 
     async def _fetch_tag_types(self) -> bool:
-        """Fetch tag type definitions from GitHub.
+        """Fetch tag type definitions from the AP, or from GitHub without an AP.
 
-        Retrieves tag type definitions from the OpenEPaperLink GitHub repository:
-
-        1. Queries the GitHub API to list available definition files
+        1. Lists the available definition files (the AP's /tagtypes
+           directory, or the GitHub repository when no AP is configured)
         2. Downloads each file and parses as JSON
         3. Validates the definition contains required fields
         4. Creates TagType instances from valid definitions
 
-        If fetching fails and no existing definitions are available,
-        falls back to built-in basic definitions.
+        Existing definitions are kept when fetching fails.
         """
+        ap_host = self._get_ap_host()
+        source = f"ap:{ap_host}" if ap_host else "github"
         try:
-            async with aiohttp.ClientSession() as session:
-                # First get the directory listing from GitHub API
-                headers = {"Accept": "application/vnd.github.v3+json"}
-                async with session.get(GITHUB_API_URL, headers=headers) as response:
-                    if response.status != 200:
-                        raise Exception(f"GitHub API returned status {response.status}")
-
-                    directory_contents = await response.json()
-
-                    # Filter for .json files and extract type IDs
-                    type_files = []
-                    for item in directory_contents:
-                        if item["name"].endswith(".json"):
-                            # Try to extract type ID from filename
-                            try:
-                                base_name = item["name"][:-5]  # Remove .json extension
-                                try:
-                                    type_id = int(base_name, 16)
-                                    _LOGGER.debug(f"Parsed hex type ID {base_name} -> {type_id}")
-                                    type_files.append((type_id, item["download_url"]))
-                                    continue
-                                except ValueError:
-                                    pass
-
-                                # If not hex, try decimal
-                                try:
-                                    type_id = int(base_name)
-                                    _LOGGER.debug(f"Parsed decimal type ID {base_name} -> {type_id}")
-                                    type_files.append((type_id, item["download_url"]))
-                                    continue
-                                except ValueError:
-                                    pass
-                                _LOGGER.warning(f"Could not parse type ID from filename: {item['name']}")
-
-                            except Exception as e:
-                                _LOGGER.warning(f"Error processing filename {item['name']}: {str(e)}")
+            async with aiohttp.ClientSession(timeout=REQUEST_TIMEOUT) as session:
+                if ap_host:
+                    type_files = await self._list_ap_type_files(session, ap_host)
+                else:
+                    type_files = await self._list_github_type_files(session)
 
                 # Now fetch all found definitions
                 new_types = {}
@@ -383,17 +385,99 @@ class TagTypesManager:
                 if new_types:
                     self._tag_types = new_types
                     self._last_update = datetime.now()
-                    _LOGGER.info(f"Successfully loaded {len(new_types)} tag definitions")
+                    self._source = source
+                    _LOGGER.info(f"Successfully loaded {len(new_types)} tag definitions from {source}")
                     await self._save_to_store()
                     return True
                 _LOGGER.error("No valid tag definitions found")
 
         except Exception as e:
-            _LOGGER.error(f"Error fetching tag types: {str(e)}")
+            _LOGGER.error(f"Error fetching tag types from {source}: {str(e)}")
             return False
 
         # Do NOT load fallback types - let caller decide how to handle failure
         return False
+
+    async def _list_ap_type_files(
+            self, session: aiohttp.ClientSession, host: str
+    ) -> list[tuple[int, str]]:
+        """List the tag type definition files in the AP's /tagtypes directory."""
+        async with session.get(AP_TAGTYPES_LIST_URL.format(host=host)) as response:
+            if response.status != 200:
+                raise Exception(f"AP returned status {response.status}")
+            # The AP's file editor doesn't always send a JSON content type
+            directory_contents = json.loads(await response.text())
+
+        type_files = []
+        for item in directory_contents:
+            if item.get("type") != "file":
+                continue
+            type_id = self._parse_type_id(item["name"])
+            if type_id is not None:
+                type_files.append(
+                    (type_id, AP_TAGTYPE_URL.format(host=host, name=item["name"]))
+                )
+        return type_files
+
+    async def _list_github_type_files(
+            self, session: aiohttp.ClientSession
+    ) -> list[tuple[int, str]]:
+        """List the tag type definition files in the OpenEPaperLink GitHub repository."""
+        headers = {"Accept": "application/vnd.github.v3+json"}
+        async with session.get(GITHUB_API_URL, headers=headers) as response:
+            if response.status != 200:
+                raise Exception(f"GitHub API returned status {response.status}")
+            directory_contents = await response.json()
+
+        type_files = []
+        for item in directory_contents:
+            type_id = self._parse_type_id(item["name"])
+            if type_id is not None:
+                type_files.append((type_id, item["download_url"]))
+        return type_files
+
+    @staticmethod
+    def _parse_type_id(filename: str) -> int | None:
+        """Extract the type ID from a definition filename (hex, or decimal as fallback)."""
+        if not filename.endswith(".json"):
+            return None
+        base_name = filename[:-5]  # Remove .json extension
+        for base in (16, 10):
+            try:
+                type_id = int(base_name, base)
+                _LOGGER.debug(f"Parsed type ID {base_name} -> {type_id}")
+                return type_id
+            except ValueError:
+                pass
+        _LOGGER.warning(f"Could not parse type ID from filename: {filename}")
+        return None
+
+    async def async_refresh_for_unknown_type(self, hw_type: int) -> bool:
+        """Refresh the tag types when a tag reports an unknown hardware type.
+
+        The AP only keeps definitions for the tag types it has seen, so a new
+        tag type can appear at any time. Refreshes at most once per
+        UNKNOWN_TYPE_REFRESH_INTERVAL.
+
+        Args:
+            hw_type: Hardware type ID reported by the tag
+
+        Returns:
+            bool: True if the hardware type is known after the refresh
+        """
+        async with self._lock:
+            if hw_type in self._tag_types:
+                return True
+            now = datetime.now()
+            if (
+                    self._last_unknown_refresh
+                    and now - self._last_unknown_refresh < UNKNOWN_TYPE_REFRESH_INTERVAL
+            ):
+                return False
+            self._last_unknown_refresh = now
+            _LOGGER.info("Unknown tag type %s, refreshing tag type definitions", hw_type)
+            await self._fetch_tag_types()
+            return hw_type in self._tag_types
 
     def _validate_tag_definition(self, data: Dict) -> bool:
         """Validate that a tag definition has required fields.

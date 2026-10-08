@@ -530,6 +530,31 @@ class Hub:
             # Will be implemented in the future
             await self._store.async_save({"tags": self._data})
 
+    async def _async_resolve_unknown_tag_type(self, tag_mac: str, hw_type: int) -> None:
+        """Fetch the definition of an unknown tag type and update the tag's device.
+
+        Args:
+            tag_mac: MAC address of the tag that reported the type
+            hw_type: Hardware type ID that isn't in the tag type definitions
+        """
+        if not await self._tag_manager.async_refresh_for_unknown_type(hw_type):
+            return
+
+        hw_string = get_hw_string(hw_type)
+        width, height = self._tag_manager.get_hw_dimensions(hw_type)
+        if tag_mac in self._data:
+            self._data[tag_mac].update(hw_string=hw_string, width=width, height=height)
+
+        device_registry = dr.async_get(self.hass)
+        device = device_registry.async_get_device(identifiers={(DOMAIN, tag_mac)})
+        if device:
+            device_registry.async_update_device(
+                device.id,
+                model=hw_string,
+                hw_version=f"{width}x{height}",
+            )
+        async_dispatcher_send(self.hass, f"{SIGNAL_TAG_UPDATE}_{tag_mac}")
+
 
     async def _handle_log_message(self, log_msg: str) -> None:
         """Process a log message from the AP.
@@ -606,6 +631,8 @@ class Hub:
         battery_mv = tag_data.get("batteryMv")
         pending = tag_data.get("pending")
         hw_type = tag_data.get("hwType")
+        if hw_type is not None and not self._tag_manager.is_in_hw_map(hw_type):
+            self.hass.async_create_task(self._async_resolve_unknown_tag_type(tag_mac, hw_type))
         hw_string = get_hw_string(hw_type)
         width, height = self._tag_manager.get_hw_dimensions(hw_type)
         content_mode = tag_data.get("contentMode")

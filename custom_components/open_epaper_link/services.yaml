@@ -292,5 +292,5 @@ reboot_ap:
 
 refresh_tag_types:
   name: Refresh Tag Types
-  description: Force refresh of tag type definitions from GitHub
+  description: Force refresh of tag type definitions from the AP (or GitHub without an AP)
   target:

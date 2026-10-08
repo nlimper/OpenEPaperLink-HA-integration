@@ -373,7 +373,7 @@ async def async_setup_services(hass: HomeAssistant) -> None:
         await hub.reboot_ap()
 
     async def refresh_tag_types_service(service: ServiceCall) -> None:
-        """Force refresh tag types from GitHub."""
+        """Force refresh tag types from the AP (or GitHub without an AP)."""
         manager = await get_tag_types_manager(hass)
         manager._last_update = None  # Force refresh by invalidating cache
 
@@ -381,7 +381,7 @@ async def async_setup_services(hass: HomeAssistant) -> None:
         await manager.ensure_types_loaded()
 
         tag_types_len = len(manager.get_all_types())
-        message = f"Successfully refreshed {tag_types_len} tag type definitions from GitHub"
+        message = f"Successfully refreshed {tag_types_len} tag type definitions"
 
         await hass.services.async_call(
             "persistent_notification",
