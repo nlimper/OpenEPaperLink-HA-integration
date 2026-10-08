@@ -775,12 +775,36 @@ class Hub:
                 return await func()
             return await self.hass.async_add_executor_job(func)
 
-    async def _ap_request(self, method: str, path: str, *, data=None, timeout=10, action: str) -> requests.Response:
+    async def _ap_request(
+            self,
+            method: str,
+            path: str,
+            *,
+            data=None,
+            timeout=10,
+            action: str,
+            accept_read_timeout: bool = False,
+    ) -> requests.Response | None:
         url = f"http://{self.host}/{path.lstrip('/')}"
         def call():
             return requests.request(method, url, data=data, timeout=timeout)
         try:
             resp = await self._run_ap_command(call)
+        except requests.exceptions.ReadTimeout:
+            if accept_read_timeout:
+                # Current AP firmware restarts before it can finish the HTTP
+                # response. A read timeout therefore confirms that the POST
+                # reached the previously online AP and is expected here.
+                _LOGGER.info(
+                    "AP disconnected while handling %s; treating request as accepted",
+                    action,
+                )
+                return None
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="ap_timeout_action",
+                translation_placeholders={"action": action},
+            ) from None
         except requests.exceptions.Timeout:
             raise HomeAssistantError(
                 translation_domain=DOMAIN,
@@ -813,7 +837,12 @@ class Hub:
         return True
 
     async def reboot_ap(self) -> bool:
-        await self._ap_request("post", "reboot", action="reboot OEPL AP")
+        await self._ap_request(
+            "post",
+            "reboot",
+            action="reboot OEPL AP",
+            accept_read_timeout=True,
+        )
         _LOGGER.info("Rebooted OEPL AP")
         return True
 
