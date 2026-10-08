@@ -186,6 +186,13 @@ def to_image(raw_data: bytes, tag_type: TagType) -> bytes:
         black_plane = data[:bytes_per_plane]
         color_plane = data[bytes_per_plane:bytes_per_plane * 2] if tag_type.bpp == 2 else None
 
+        # The plane bits form an index into the color table, as in the AP web UI:
+        # first plane = bit 0, second plane = bit 1. For BWR (white, black, red) that is
+        # 0 white, 1 black, 2 red; for BWRY (black, white, yellow, red) 0 black, 1 white,
+        # 2 yellow, 3 red. An index outside the table (both bits set on BWR) shows black.
+        colors_list = list(color_table.values())
+        fallback = color_table.get('black', (0, 0, 0))
+
         # Process pixels
         for y in range(native_height):
             row_offset = y * bytes_per_row
@@ -193,20 +200,11 @@ def to_image(raw_data: bytes, tag_type: TagType) -> bytes:
                 byte_offset = row_offset + (x // 8)
                 bit_mask = 0x80 >> (x % 8)
 
-                black = bool(black_plane[byte_offset] & bit_mask)
-                color = bool(color_plane[byte_offset] & bit_mask) if color_plane else False
+                index = 1 if black_plane[byte_offset] & bit_mask else 0
+                if color_plane and color_plane[byte_offset] & bit_mask:
+                    index |= 2
 
-                if black and color:
-                    pixels[x, y] = color_table['black']  # Overlap
-                elif black:
-                    pixels[x, y] = color_table['black']
-                elif color:
-                    # Use first available color that's not black or white
-                    color_key = next((k for k in color_table.keys()
-                                      if k not in ['black', 'white']), 'white')
-                    pixels[x, y] = color_table[color_key]
-                else:
-                    pixels[x, y] = color_table['white']
+                pixels[x, y] = colors_list[index] if index < len(colors_list) else fallback
 
     else:  # 3-4 bit packed format
         bits_per_pixel = tag_type.bpp
