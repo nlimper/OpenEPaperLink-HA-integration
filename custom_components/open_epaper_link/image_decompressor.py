@@ -172,8 +172,10 @@ def to_image(raw_data: bytes, tag_type: TagType) -> bytes:
     img = Image.new('RGB', (native_width, native_height), 'white')
     pixels = img.load()
 
-    # Convert color table to RGB tuples
-    color_table = {k: tuple(v) for k, v in tag_type.color_table.items()}
+    # Convert color table to RGB tuples. Like the AP web UI, prefer the perceptual
+    # table (how the colors look on the display); same order as the color table.
+    table = getattr(tag_type, 'perceptual', None) or tag_type.color_table
+    color_table = {k: tuple(v) for k, v in table.items()}
 
     _LOGGER.debug(f"Available colors: {list(color_table.keys())}")
 

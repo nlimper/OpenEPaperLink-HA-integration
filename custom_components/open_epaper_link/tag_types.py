@@ -51,6 +51,7 @@ class TagType:
         rotatebuffer: Buffer rotation setting (0=none, 1=90°, 2=180°, 3=270°)
         bpp: Bits per pixel (color depth)
         color_table: Mapping of color names to RGB values
+        perceptual: Color table as the colors look on the display, for previews (optional)
         short_lut: Short LUT configuration
         options: Additional tag options
         content_ids: Compatible content IDs
@@ -82,6 +83,7 @@ class TagType:
             'black': [0, 0, 0],
             'red': [255, 0, 0],
         })
+        self.perceptual = data.get('perceptual')
         self.short_lut = data.get('shortlut', 2)
         self.options = data.get('options', [])
         self.content_ids = data.get('contentids', [])
@@ -107,6 +109,7 @@ class TagType:
             'rotatebuffer': self.rotatebuffer,
             'bpp': self.bpp,
             'colortable': self.color_table,
+            'perceptual': self.perceptual,
             'shortlut': self.short_lut,
             'options': list(self.options),
             'contentids': list(self.content_ids),
@@ -138,6 +141,7 @@ class TagType:
             'bpp': data.get('bpp'),
             'shortlut': data.get('short_lut', data.get('shortlut')),
             'colortable': data.get('colortable'),
+            'perceptual': data.get('perceptual'),
             'options': data.get('options', []),
             'contentids': data.get('contentids', data.get('content_ids', [])),
             'template': data.get('template', {}),
