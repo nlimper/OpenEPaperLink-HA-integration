@@ -74,8 +74,11 @@ async def async_setup_services(hass: HomeAssistant) -> None:
                 translation_placeholders={"device_id": device_id},
             )
 
-        domain_mac = next(iter(device.identifiers))
-        if domain_mac[0] != DOMAIN:
+        domain_mac = next(
+            (identifier for identifier in device.identifiers if identifier[0] == DOMAIN),
+            None,
+        )
+        if domain_mac is None:
             raise ServiceValidationError(
                 translation_domain=DOMAIN,
                 translation_key="device_not_oepl",
@@ -265,13 +268,6 @@ async def async_setup_services(hass: HomeAssistant) -> None:
                     translation_domain=DOMAIN,
                     translation_key="invalid_payload",
                     translation_placeholders={"errors": errors_str},
-                )
-
-            if device_errors:
-                _LOGGER.warning(
-                    "Completed with warnings for device %s:\n%s",
-                    entity_id,
-                    "\n".join(device_errors)
                 )
 
             # Handle dry-run mode

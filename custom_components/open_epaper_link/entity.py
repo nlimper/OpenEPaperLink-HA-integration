@@ -16,6 +16,18 @@ if TYPE_CHECKING:
     from .runtime_data import OpenEPaperLinkConfigEntry
 
 
+def _format_tag_firmware_version(firmware_version) -> str:
+    """Format AP tag firmware versions without raising on malformed data."""
+    if firmware_version in (None, ""):
+        return "Unknown"
+
+    firmware_version_str = str(firmware_version)
+    try:
+        return f"0x{int(firmware_version_str, 16):X}"
+    except ValueError:
+        return firmware_version_str
+
+
 class OpenEPaperLinkAPEntity(Entity):
     """
     Base entity for AP-level entities (switch, select, text, AP sensors).
@@ -103,7 +115,7 @@ class OpenEPaperLinkTagEntity(Entity):
         hw_type = tag_data.get("hw_type", 0)
         hw_string = get_hw_string(hw_type)
         width, height = get_hw_dimensions(hw_type)
-        firmware_version = str(tag_data.get("version", ""))
+        firmware_version = tag_data.get("version")
 
         return DeviceInfo(
             identifiers={(DOMAIN, self._tag_mac)},
@@ -111,7 +123,7 @@ class OpenEPaperLinkTagEntity(Entity):
             manufacturer="OpenEPaperLink",
             model=hw_string,
             via_device=(DOMAIN, "ap"),
-            sw_version=f"0x{int(firmware_version, 16):X}" if firmware_version else "Unknown",
+            sw_version=_format_tag_firmware_version(firmware_version),
             serial_number=self._tag_mac,
             hw_version=f"{width}x{height}",
         )

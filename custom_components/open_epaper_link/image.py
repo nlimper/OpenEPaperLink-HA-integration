@@ -236,10 +236,8 @@ class ESLImage(OpenEPaperLinkTagEntity, ImageEntity):
         if isinstance(data, bytes):
             self._cached_image = data
             self._last_updated = datetime.now()
-            self.async_write_ha_state()
         elif data:
             self.hass.async_create_task(self._refresh_image())
-            self.async_write_ha_state()
         self.async_write_ha_state()
 
 

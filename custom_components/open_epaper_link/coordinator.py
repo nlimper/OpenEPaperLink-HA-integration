@@ -10,7 +10,7 @@ import async_timeout
 import websockets
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP
-from homeassistant.core import HomeAssistant, CALLBACK_TYPE, callback
+from homeassistant.core import HomeAssistant, CALLBACK_TYPE
 from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.dispatcher import async_dispatcher_send
@@ -458,7 +458,6 @@ class Hub:
         except Exception as err:
             _LOGGER.exception("Error handling message: %s", err)
 
-    @callback
     async def _handle_system_message(self, sys_data: dict) -> None:
         """Process a system message from the AP.
 
@@ -504,7 +503,6 @@ class Hub:
 
         async_dispatcher_send(self.hass, SIGNAL_AP_UPDATE)
 
-    @callback
     async def _handle_tag_message(self, tag_data: dict) -> None:
         """Process a tag update message from the AP.
 
