@@ -147,7 +147,7 @@ class TagNameText(OpenEPaperLinkTagEntity, TextEntity):
             data = {'mac': self._tag_mac, 'alias': value}
             try:
                 result = await self.hass.async_add_executor_job(
-                    lambda: requests.post(url, data=data)
+                    lambda: requests.post(url, data=data, timeout=10)
                 )
                 if result.status_code != 200:
                     raise HomeAssistantError(

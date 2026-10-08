@@ -153,7 +153,7 @@ class ESLImage(OpenEPaperLinkTagEntity, ImageEntity):
         """Fetch raw image data from AP."""
         url = f"http://{self._hub.host}/current/{self._tag_mac}.raw"
         try:
-            result = await self.hass.async_add_executor_job(lambda: requests.get(url))
+            result = await self.hass.async_add_executor_job(lambda: requests.get(url, timeout=10))
             if result.status_code == 200:
                 return result.content
             if result.status_code == 404:

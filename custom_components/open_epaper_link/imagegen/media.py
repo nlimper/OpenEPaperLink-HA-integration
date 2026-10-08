@@ -131,7 +131,7 @@ async def draw_downloaded_image(ctx: DrawingContext, element: dict) -> None:
         if element['url'].startswith(('http://', 'https://')):
             # Download web image
             response = await ctx.hass.async_add_executor_job(
-                requests.get, element['url'])
+                lambda: requests.get(element['url'], timeout=20))
             if response.status_code != 200:
                 raise HomeAssistantError(
                     translation_domain=DOMAIN,

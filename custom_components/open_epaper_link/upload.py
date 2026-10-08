@@ -6,7 +6,6 @@ from datetime import datetime
 from io import BytesIO
 from typing import Final
 
-import async_timeout
 import requests
 from requests_toolbelt import MultipartEncoder
 from PIL import Image
@@ -27,6 +26,7 @@ DITHER_ORDERED = 2
 DITHER_DEFAULT = DITHER_ORDERED
 
 MAX_RETRIES = 3
+UPLOAD_TIMEOUT = 30  # seconds, per connect/read on the AP
 INITIAL_BACKOFF = 2  # seconds
 
 
@@ -275,14 +275,16 @@ async def upload_to_hub(hub, entity_id: str, img: Image.Image, dither: int, ttl:
 
             mp_encoder = MultipartEncoder(fields=fields)
 
-            async with async_timeout.timeout(30):  # 30 second timeout for upload
-                response = await hub.hass.async_add_executor_job(
-                    lambda: requests.post(
-                        url,
-                        headers={'Content-Type': mp_encoder.content_type},
-                        data=mp_encoder
-                    )
+            # The timeout is on the request itself: an asyncio timeout around the
+            # executor job would leave the upload running while the retry starts.
+            response = await hub.hass.async_add_executor_job(
+                lambda: requests.post(
+                    url,
+                    headers={'Content-Type': mp_encoder.content_type},
+                    data=mp_encoder,
+                    timeout=UPLOAD_TIMEOUT,
                 )
+            )
 
             if response.status_code != 200:
                 raise HomeAssistantError(
@@ -292,7 +294,7 @@ async def upload_to_hub(hub, entity_id: str, img: Image.Image, dither: int, ttl:
                 )
             break
 
-        except asyncio.TimeoutError:
+        except (asyncio.TimeoutError, requests.exceptions.Timeout):
             if attempt < MAX_RETRIES:
                 _LOGGER.warning(
                     "Timeout uploading %s (attempt %d/%d), retrying in %ds…",
