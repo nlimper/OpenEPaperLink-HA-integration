@@ -267,6 +267,7 @@ class Hub:
         - Sets shutdown flag to prevent new connection attempts
         - Cancels any active WebSocket connection task
         - Removes event listeners and callbacks
+        - Writes pending tag data to storage
         - Updates connection status for dependent entities
 
         This should be called when unloading the integration.
@@ -291,6 +292,10 @@ class Hub:
                 unsub()
             except Exception as err:
                 _LOGGER.debug("Error cleaning up callback: %s", err)
+
+        # Write now instead of leaving a delayed save pending: that could
+        # recreate the storage file after the entry is removed
+        await self._store.async_save({"tags": self._data})
 
         # Mark as offline
         self.online = False
@@ -522,13 +527,12 @@ class Hub:
 
         # Process tag data
         is_new_tag = await self._process_tag_data(tag_mac, tag_data)
-        # Save to storage if this was a new tag
+        # Save to storage right away if this was a new tag
         if is_new_tag:
             await self._store.async_save({"tags": self._data})
         else:
-            # Schedule a save with a delay to avoid constant writes
-            # Will be implemented in the future
-            await self._store.async_save({"tags": self._data})
+            # Schedule a save with a delay to avoid writing on every check-in
+            self._store.async_delay_save(lambda: {"tags": self._data}, SAVE_DELAY)
 
     async def _async_resolve_unknown_tag_type(self, tag_mac: str, hw_type: int) -> None:
         """Fetch the definition of an unknown tag type and update the tag's device.
