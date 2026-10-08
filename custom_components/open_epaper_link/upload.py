@@ -30,6 +30,13 @@ MAX_RETRIES = 3
 INITIAL_BACKOFF = 2  # seconds
 
 
+def image_to_jpeg_bytes(image: Image.Image, quality: int | str = 95) -> bytes:
+    """Encode a PIL image as JPEG bytes for AP upload or HA image preview."""
+    buffer = BytesIO()
+    image.convert("RGB").save(buffer, format="JPEG", quality=quality)
+    return buffer.getvalue()
+
+
 class UploadQueueHandler:
     """Handle queued image uploads to the AP.
 
@@ -212,7 +219,7 @@ class UploadQueueHandler:
             _LOGGER.debug("Upload task for %s finished. %s", entity_id, self)
 
 
-async def upload_to_hub(hub, entity_id: str, img: bytes, dither: int, ttl: int,
+async def upload_to_hub(hub, entity_id: str, img: Image.Image, dither: int, ttl: int,
                        preload_type: int = 0, preload_lut: int = 0, lut: int = 1) -> None:
     """Upload image to tag through AP.
 
@@ -225,7 +232,7 @@ async def upload_to_hub(hub, entity_id: str, img: bytes, dither: int, ttl: int,
     Args:
         hub: Hub instance with connection details
         entity_id: Entity ID of the target tag
-        img: JPEG image data as bytes
+        img: Rendered image to encode and upload
         dither: Dithering mode (0=none, 1=Floyd-Steinberg, 2=ordered)
         ttl: Time-to-live in seconds
         preload_type: Type for image preloading (0=disabled)
@@ -243,6 +250,7 @@ async def upload_to_hub(hub, entity_id: str, img: bytes, dither: int, ttl: int,
 
     # Convert TTL fom seconds to minutes for the AP
     ttl_minutes = max(1, ttl // 60)
+    jpeg_bytes = await hub.hass.async_add_executor_job(image_to_jpeg_bytes, img, "maximum")
 
     backoff_delay = INITIAL_BACKOFF # Try up to MAX_RETRIES times to upload the image, retrying on TimeoutError.
 
@@ -256,7 +264,7 @@ async def upload_to_hub(hub, entity_id: str, img: bytes, dither: int, ttl: int,
                 'dither': str(dither),
                 'ttl': str(ttl_minutes),
                 'lut': str(lut),
-                'image': ('image.jpg', img, 'image/jpeg'),
+                'image': ('image.jpg', jpeg_bytes, 'image/jpeg'),
             }
 
             if preload_type > 0:

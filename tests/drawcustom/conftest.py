@@ -2,6 +2,7 @@
 import os
 import sys
 import pytest
+from io import BytesIO
 from unittest.mock import AsyncMock, MagicMock, patch
 from PIL import ImageFont
 
@@ -173,13 +174,16 @@ def save_image(image_bytes):
 
 async def generate_test_image(image_gen: ImageGen, service_data, entity_id="open_epaper_link.test_tag"):
     """Helper to generate test images with standard dimensions."""
-    return  await image_gen.generate_custom_image(
+    image = await image_gen.generate_custom_image(
         entity_id=entity_id,
         service_data=service_data,
         width=296,
         height=128,
         accent_color="red"
     )
+    buffer = BytesIO()
+    image.convert("RGB").save(buffer, format="JPEG", quality="maximum")
+    return buffer.getvalue()
 
 
 # Setup and cleanup code that runs before and after each test session

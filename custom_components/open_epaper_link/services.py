@@ -13,7 +13,13 @@ from .ble import BLEConnectionError, BLETimeoutError, BLEProtocolError
 from .const import DOMAIN, SIGNAL_TAG_IMAGE_UPDATE
 from .imagegen import ImageGen
 from .tag_types import get_tag_types_manager
-from .upload import create_upload_queues, DITHER_DEFAULT, upload_to_ble_block, upload_to_hub
+from .upload import (
+    create_upload_queues,
+    DITHER_DEFAULT,
+    image_to_jpeg_bytes,
+    upload_to_ble_block,
+    upload_to_hub,
+)
 from .util import is_ble_entry, get_hub_from_hass, rgb_to_rgb332, int_to_hex_string, \
     is_ble_device, get_mac_from_entity_id
 
@@ -253,7 +259,7 @@ async def async_setup_services(hass: HomeAssistant) -> None:
             width, height, accent_color = await generator.get_tag_dimensions(
                 entity_id, is_ble=is_ble
             )
-            image_data = await generator.generate_custom_image(
+            image = await generator.generate_custom_image(
                 entity_id=entity_id,
                 service_data=service.data,
                 error_collector=device_errors,
@@ -274,10 +280,13 @@ async def async_setup_services(hass: HomeAssistant) -> None:
             if service.data.get("dry-run", False):
                 _LOGGER.info("Dry run completed for %s", entity_id)
                 tag_mac = get_mac_from_entity_id(entity_id)
+                jpeg_bytes = await hass.async_add_executor_job(
+                    image_to_jpeg_bytes, image, "maximum"
+                )
                 async_dispatcher_send(
                     hass,
                     f"{SIGNAL_TAG_IMAGE_UPDATE}_{tag_mac}",
-                    image_data
+                    jpeg_bytes
                 )
                 return
 
@@ -296,14 +305,17 @@ async def async_setup_services(hass: HomeAssistant) -> None:
                     )
 
                 # Determine upload method
-                await ble_upload_queue.add_to_queue(upload_to_ble_block, hass, entity_id, image_data, dither)
+                jpeg_bytes = await hass.async_add_executor_job(
+                    image_to_jpeg_bytes, image, "maximum"
+                )
+                await ble_upload_queue.add_to_queue(upload_to_ble_block, hass, entity_id, jpeg_bytes, dither)
             else:
                 # Map refresh_type to AP's lut parameter
                 # 0→1 (full), 1→3 (fast), 2→2 (fast no-reds), 3→0 (no-repeats)
                 ap_lut_mapping = {0: 1, 1: 3, 2: 2, 3: 0}
                 ap_lut = ap_lut_mapping.get(refresh_type, 1)  # Default to 1 (full) if invalid
                 await hub_upload_queue.add_to_queue(
-                    upload_to_hub, hub, entity_id, image_data, dither,
+                    upload_to_hub, hub, entity_id, image, dither,
                     service.data.get("ttl", 60),
                     service.data.get("preload_type", 0),
                     service.data.get("preload_lut", 0),

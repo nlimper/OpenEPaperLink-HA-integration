@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import io
 import logging
 from typing import Optional, Dict, Any
 
@@ -312,11 +311,11 @@ class ImageGen:
             width: int,
             height: int,
             accent_color: str,
-    ) -> bytes:
+    ) -> Image.Image:
         """Generate a custom image based on service data.
 
         Main entry point for image generation. Creates an image with the
-        specified elements and returns the JPEG data.
+        specified elements and returns the rendered image.
 
         Args:
             entity_id: The entity ID to generate the image for
@@ -327,7 +326,7 @@ class ImageGen:
             accent_color: Accent color name
 
         Returns:
-            bytes: JPEG image data
+            Image.Image: Rendered RGB image
 
         Raises:
             HomeAssistantError: If image generation fails
@@ -403,12 +402,4 @@ class ImageGen:
         if rotate:
             img = img.rotate(rotate, expand=True)
 
-        # Convert to RGB for JPEG
-        rgb_image = img.convert('RGB')
-
-        # Create BytesIO object for the JPEG data
-        img_byte_arr = io.BytesIO()
-        rgb_image.save(img_byte_arr, format='JPEG', quality="maximum")
-        image_data = img_byte_arr.getvalue()
-
-        return image_data
+        return img.convert('RGB')
