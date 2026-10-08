@@ -11,6 +11,20 @@ from .runtime_data import OpenEPaperLinkBLERuntimeData
 _LOGGER = logging.getLogger(__name__)
 
 
+def async_get_device_by_identifier(hass: HomeAssistant, identifier: tuple[str, str], config_entry_id: str):
+    """Get the device with this identifier that belongs to the config entry.
+
+    Uses DeviceRegistry.async_get_device_by_identifier (HA 2026.9+) and falls back
+    to the deprecated async_get_device on older Home Assistant versions.
+    """
+    from homeassistant.helpers import device_registry as dr
+
+    device_registry = dr.async_get(hass)
+    if hasattr(device_registry, "async_get_device_by_identifier"):
+        return device_registry.async_get_device_by_identifier(identifier, config_entry_id)
+    return device_registry.async_get_device(identifiers={identifier})
+
+
 def is_bluetooth_available(hass: HomeAssistant) -> bool:
     """Check if Bluetooth integration is available with working scanners.
     
@@ -169,13 +183,14 @@ def is_ble_device(hass: HomeAssistant, entity_id: str) -> bool:
     mac = entity_id.split(".")[1].upper()
     device_registry = dr.async_get(hass)
 
-    for device in device_registry.devices.values():
-        for identifier in device.identifiers:
-            if identifier[0] == DOMAIN:
-                device_mac = identifier[1]
-                if device_mac.startswith("ble_"):
-                    device_mac = device_mac[4:]
-                if device_mac.upper() == mac:
-                    return identifier[1].startswith("ble_")
+    for entry in hass.config_entries.async_entries(DOMAIN):
+        for device in dr.async_entries_for_config_entry(device_registry, entry.entry_id):
+            for identifier in device.identifiers:
+                if identifier[0] == DOMAIN:
+                    device_mac = identifier[1]
+                    if device_mac.startswith("ble_"):
+                        device_mac = device_mac[4:]
+                    if device_mac.upper() == mac:
+                        return identifier[1].startswith("ble_")
 
     return False

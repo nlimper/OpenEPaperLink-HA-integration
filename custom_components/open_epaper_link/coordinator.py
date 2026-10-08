@@ -21,6 +21,7 @@ import logging
 
 from .const import DOMAIN, SIGNAL_AP_UPDATE, SIGNAL_TAG_UPDATE, SIGNAL_TAG_IMAGE_UPDATE
 from .tag_types import get_tag_types_manager, get_hw_string
+from .util import async_get_device_by_identifier
 
 _LOGGER: Final = logging.getLogger(__name__)
 
@@ -550,7 +551,7 @@ class Hub:
             self._data[tag_mac].update(hw_string=hw_string, width=width, height=height)
 
         device_registry = dr.async_get(self.hass)
-        device = device_registry.async_get_device(identifiers={(DOMAIN, tag_mac)})
+        device = async_get_device_by_identifier(self.hass, (DOMAIN, tag_mac), self.entry.entry_id)
         if device:
             device_registry.async_update_device(
                 device.id,
@@ -651,9 +652,7 @@ class Hub:
             _LOGGER.debug("Tag name changed from '%s' to '%s'", old_name, tag_name)
             # Update device name in device registry
             device_registry = dr.async_get(self.hass)
-            device = device_registry.async_get_device(
-                identifiers={(DOMAIN, tag_mac)}
-            )
+            device = async_get_device_by_identifier(self.hass, (DOMAIN, tag_mac), self.entry.entry_id)
             if device:
                 device_registry.async_update_device(
                     device.id,
@@ -758,10 +757,7 @@ class Hub:
                     self._nfc_last_scan[debounce_key] = current_time
 
             if should_fire:
-                device_registry = dr.async_get(self.hass)
-                device = device_registry.async_get_device(
-                    identifiers={(DOMAIN, tag_mac)}
-                )
+                device = async_get_device_by_identifier(self.hass, (DOMAIN, tag_mac), self.entry.entry_id)
                 if device:
                     self.hass.bus.async_fire(f"{DOMAIN}_event", {
                         "device_id": device.id,
