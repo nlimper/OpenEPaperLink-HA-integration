@@ -19,7 +19,7 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 import logging
 
-from .const import DOMAIN, SIGNAL_AP_UPDATE, SIGNAL_TAG_UPDATE, SIGNAL_TAG_IMAGE_UPDATE
+from .const import DOMAIN, SIGNAL_AP_UPDATE, SIGNAL_TAG_UPDATE, SIGNAL_TAG_IMAGE_UPDATE, SIGNAL_TAG_REMOVED
 from .tag_types import get_tag_types_manager, get_hw_string
 from .util import async_get_device_by_identifier
 
@@ -37,6 +37,10 @@ HA_CONTENT_MODES: Final = {0, 22, 25}
 AP_DISPLAY_HW_TYPES: Final = range(0xE0, 0xF0)
 
 RECONNECT_INTERVAL = 30
+# Wait before removing tags that are missing from the AP's tag list, and
+# check again. Right after booting, the AP serves /get_db before it has
+# loaded its tag database, and an AP that is being tested can be slow.
+TAG_VERIFY_DELAY = 300  # seconds
 SAVE_DELAY = 10
 WEBSOCKET_TIMEOUT = 60
 CONNECTION_TIMEOUT = 10
@@ -290,6 +294,9 @@ class Hub:
         # Set shutdown flag first
         self._shutdown.set()
 
+        if self._cleanup_task and not self._cleanup_task.done():
+            self._cleanup_task.cancel()
+
         # Cancel WebSocket task
         if self._ws_task and not self._ws_task.done():
             self._ws_task.cancel()
@@ -348,7 +355,7 @@ class Hub:
                     async_dispatcher_send(self.hass, f"{DOMAIN}_connection_status", True)
 
                     # Run verification on each connection to catch deletions that happened while offline
-                    await self._verify_and_cleanup_tags()
+                    self._schedule_tag_verification()
 
                     while not self._shutdown.is_set():
                         try:
@@ -1009,18 +1016,23 @@ class Hub:
             # Record count has decreased, indicating a possible tag deletion
             _LOGGER.info(f"AP record count decreased from {self._last_record_count} to {new_record_count}. Checking for deleted tags...")
 
-            # Cancel existing cleanup task if any
-            if self._cleanup_task and not self._cleanup_task.done():
-                self._cleanup_task.cancel()
-
-            # Schedule cleanup task to verify and clean up any deleted tags
-            self._cleanup_task = self.hass.async_create_task(
-                self._verify_and_cleanup_tags(),
-                f"{DOMAIN}_tag_verification"
-            )
+            self._schedule_tag_verification()
 
         # Update the last known record count
         self._last_record_count = new_record_count
+
+    def _schedule_tag_verification(self) -> None:
+        """Start a background check for tags that were deleted from the AP.
+
+        Replaces a check that is still running.
+        """
+        if self._cleanup_task and not self._cleanup_task.done():
+            self._cleanup_task.cancel()
+
+        self._cleanup_task = self.hass.async_create_task(
+            self._verify_and_cleanup_tags(),
+            f"{DOMAIN}_tag_verification"
+        )
 
     async def _verify_and_cleanup_tags(self) -> None:
         """Verify which tags exist on the AP and clean up deleted ones.
@@ -1035,21 +1047,21 @@ class Hub:
         This ensures Home Assistant's state matches the actual AP state
         when tags are removed from the AP directly.
 
+        A tag is only removed if it is still missing when checked again
+        after TAG_VERIFY_DELAY, and nothing is removed while the AP reports
+        no tags at all: right after booting, the AP answers before it has
+        loaded its tag database.
+
         Raises:
             No exceptions are raised as they are caught and logged internally.
         """
         try:
-            # Get current tags from AP
-            ap_tags = await self._fetch_all_tags_from_ap()
+            deleted_tags = await self._find_missing_tags()
+            if not deleted_tags:
+                return
 
-            # Map tags to mac addresses
-            ap_macs = set(ap_tags.keys())
-
-            ap_macs_upper = {mac.upper() for mac in ap_macs}
-            known_macs_upper = {mac.upper() for mac in self._known_tags}
-
-            # Find locally known tags that are missing from the AP
-            deleted_tags = known_macs_upper - ap_macs_upper
+            await asyncio.sleep(TAG_VERIFY_DELAY)
+            deleted_tags &= await self._find_missing_tags()
 
             if deleted_tags:
                 _LOGGER.info(f"Detected {len(deleted_tags)} deleted tags from AP: {deleted_tags}")
@@ -1061,6 +1073,20 @@ class Hub:
 
         except Exception as err:
             _LOGGER.error(f"Error while verifying AP tags: {err}")
+
+    async def _find_missing_tags(self) -> set[str]:
+        """Return the known tags (upper case MACs) missing from the AP's tag list.
+
+        Returns an empty set when the AP reports no tags at all.
+        """
+        ap_tags = await self._fetch_all_tags_from_ap()
+        if not ap_tags:
+            _LOGGER.debug("AP reported no tags, not checking for deleted tags")
+            return set()
+
+        ap_macs_upper = {mac.upper() for mac in ap_tags}
+        known_macs_upper = {mac.upper() for mac in self._known_tags}
+        return known_macs_upper - ap_macs_upper
 
     async def _remove_tag(self, tag_mac: str) -> None:
         """Remove a tag from HA.
@@ -1079,6 +1105,7 @@ class Hub:
             async_dispatcher_send(self.hass, f"{SIGNAL_TAG_UPDATE}_{tag_mac}")
 
             self._remove_tag_devices(tag_mac)
+            async_dispatcher_send(self.hass, SIGNAL_TAG_REMOVED, tag_mac)
 
             # Update storage
             await self._store.async_save({"tags": self._data})
@@ -1097,8 +1124,7 @@ class Hub:
         self._data.pop(tag_mac, None)
         async_dispatcher_send(self.hass, f"{SIGNAL_TAG_UPDATE}_{tag_mac}")
         self._remove_tag_devices(tag_mac)
-        # Lets platforms forget the tag, so it can be added again later
-        async_dispatcher_send(self.hass, f"{DOMAIN}_blacklist_update")
+        async_dispatcher_send(self.hass, SIGNAL_TAG_REMOVED, tag_mac)
         await self._store.async_save({"tags": self._data})
 
     def _remove_tag_devices(self, tag_mac: str) -> None:

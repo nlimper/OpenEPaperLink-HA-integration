@@ -11,7 +11,7 @@ from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from .util import is_ble_entry
 from .entity import OpenEPaperLinkTagEntity, OpenEPaperLinkBLEEntity
 from .runtime_data import OpenEPaperLinkConfigEntry
-from .const import DOMAIN, SIGNAL_TAG_IMAGE_UPDATE
+from .const import DOMAIN, SIGNAL_TAG_IMAGE_UPDATE, SIGNAL_TAG_REMOVED
 from homeassistant.components.image import ImageEntity
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -79,6 +79,15 @@ async def async_setup_entry(
             f"{DOMAIN}_tag_discovered",
             async_add_image_entity
         )
+    )
+
+    # Forget removed tags, so their image entity is added again when they come back
+    @callback
+    def handle_tag_removed(tag_mac: str) -> None:
+        added_image_entities.discard(tag_mac)
+
+    entry.async_on_unload(
+        async_dispatcher_connect(hass, SIGNAL_TAG_REMOVED, handle_tag_removed)
     )
 
     # Register callback for blacklist updates

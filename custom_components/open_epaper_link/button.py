@@ -3,7 +3,7 @@ PARALLEL_UPDATES = 1
 from dataclasses import dataclass
 
 from homeassistant.components.button import ButtonEntity, ButtonEntityDescription
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -16,7 +16,7 @@ from .entity import OpenEPaperLinkTagEntity, OpenEPaperLinkAPEntity, OpenEPaperL
 from .runtime_data import OpenEPaperLinkConfigEntry
 from .tag_types import get_tag_types_manager
 from .util import is_ble_entry
-from .const import DOMAIN
+from .const import DOMAIN, SIGNAL_TAG_REMOVED
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -117,6 +117,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: OpenEPaperLinkConfigEntr
             f"{DOMAIN}_tag_discovered",
             async_add_tag_buttons
         )
+    )
+
+    # Forget removed tags, so their buttons are added again when they come back
+    @callback
+    def handle_tag_removed(tag_mac: str) -> None:
+        added_tags.discard(tag_mac)
+
+    entry.async_on_unload(
+        async_dispatcher_connect(hass, SIGNAL_TAG_REMOVED, handle_tag_removed)
     )
 
     # Listen for blacklist updates

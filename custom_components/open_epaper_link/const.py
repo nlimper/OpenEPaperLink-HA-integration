@@ -2,4 +2,6 @@ DOMAIN = "open_epaper_link"
 SIGNAL_TAG_UPDATE = f"{DOMAIN}_tag_update"
 SIGNAL_TAG_IMAGE_UPDATE = f"{DOMAIN}_tag_image_update"
 SIGNAL_AP_UPDATE = f"{DOMAIN}_ap_update"
+# Sent with the tag MAC when a tag is removed from HA (deleted on the AP or hidden)
+SIGNAL_TAG_REMOVED = f"{DOMAIN}_tag_removed"
 ATC_CONFIG_URL = "https://atc1441.github.io/ATC_BLE_OEPL_Image_Upload.html"
