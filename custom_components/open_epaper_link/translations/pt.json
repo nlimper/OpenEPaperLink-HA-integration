@@ -47,12 +47,14 @@
         "description": "Selecione as etiquetas para lista negra. Etiquetas na lista negra serão ocultadas e ignoradas.",
         "data": {
           "blacklisted_tags": "Etiquetas na Lista Negra",
+          "hide_oepl_content_tags": "Ocultar tags com conteúdo OEPL",
           "button_debounce": "Tempo de Debounce do Botão (segundos)",
           "nfc_debounce": "Tempo de Debounce NFC (segundos)",
           "custom_font_dirs": "Diretórios de Fontes Personalizadas"
         },
         "data_description": {
           "blacklisted_tags": "Tags para ocultar; tags na lista negra não serão atualizadas nem disparam serviços.",
+          "hide_oepl_content_tags": "Mostrar apenas tags com o tipo de conteúdo Home Assistant, Imagem estática ou Não configurado. Tags com outros tipos de conteúdo não são adicionadas ao Home Assistant.",
           "button_debounce": "Atraso antes de aceitar outro acionamento do botão (segundos).",
           "nfc_debounce": "Atraso antes de aceitar outro toque NFC (segundos).",
           "custom_font_dirs": "Diretórios separados por vírgula com fontes adicionais para imagens geradas."

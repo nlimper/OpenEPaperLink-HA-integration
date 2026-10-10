@@ -47,12 +47,14 @@
         "description": "Select tags to blacklist. Blacklisted tags will be hidden and ignored.",
         "data": {
           "blacklisted_tags": "Blacklisted Tags",
+          "hide_oepl_content_tags": "Hide Tags with OEPL Content",
           "button_debounce": "Button Debounce Time (seconds)",
           "nfc_debounce": "NFC Debounce Time (seconds)",
           "custom_font_dirs": "Custom Font Directories"
         },
         "data_description": {
           "blacklisted_tags": "Tags to hide; blacklisted tags will not update or trigger services.",
+          "hide_oepl_content_tags": "Only show tags with content type Home Assistant, Static image or Not configured. Tags with other content types are not added to Home Assistant.",
           "button_debounce": "Delay before another button press is accepted (seconds).",
           "nfc_debounce": "Delay before another NFC tap is accepted (seconds).",
           "custom_font_dirs": "Comma-separated directories containing additional fonts for generated images."

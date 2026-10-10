@@ -28,6 +28,14 @@ _LOGGER: Final = logging.getLogger(__name__)
 
 STORAGE_VERSION = 1
 STORAGE_KEY = f"{DOMAIN}_tags"
+
+# Content modes that stay visible when "hide_oepl_content_tags" is enabled:
+# Not configured, Static image and Home Assistant
+HA_CONTENT_MODES: Final = {0, 22, 25}
+# Hardware types of displays built into an AP (AP display, LILYGO T-Panel, ...).
+# These are always shown, whatever their content mode.
+AP_DISPLAY_HW_TYPES: Final = range(0xE0, 0xF0)
+
 RECONNECT_INTERVAL = 30
 SAVE_DELAY = 10
 WEBSOCKET_TIMEOUT = 60
@@ -108,6 +116,8 @@ class Hub:
         self._tag_manager = None
         self._tag_manager_ready = asyncio.Event()
         self._blacklisted_tags = entry.options.get("blacklisted_tags", [])
+        self._hide_oepl_content_tags = entry.options.get("hide_oepl_content_tags", False)
+        self._content_filtered_tags: set[str] = set()
         self._last_button_press: Dict[str, datetime] = {}
         self._button_debounce_interval = timedelta(seconds=0.5)
         self._nfc_last_scan: Dict[str, datetime] = {}
@@ -137,12 +147,14 @@ class Hub:
         Updates hub settings based on changes to the config entry options:
 
         - Reloads the tag blacklist
+        - Re-applies the content mode filter when it was toggled
         - Updates debounce intervals for buttons and NFC
 
         This is called when the integration options are updated through
         the configuration flow.
         """
         await self.async_reload_blacklist()
+        await self.async_reload_content_filter()
         self._update_debounce_interval()
 
     async def async_setup_initial(self) -> None:
@@ -614,6 +626,18 @@ class Hub:
             _LOGGER.debug("Ignoring blacklisted tag: %s", tag_mac)
             return False
 
+        # Skip tags that show OEPL content, if configured
+        if self._is_hidden_by_content_mode(tag_data.get("contentMode"), tag_data.get("hwType")):
+            if tag_mac not in self._content_filtered_tags:
+                _LOGGER.debug("Hiding tag %s because of its content mode", tag_mac)
+                self._content_filtered_tags.add(tag_mac)
+                if tag_mac in self._known_tags:
+                    await self._hide_tag(tag_mac)
+            return False
+        if tag_mac in self._content_filtered_tags:
+            # Content mode changed to one we show; it gets rediscovered below
+            self._content_filtered_tags.discard(tag_mac)
+
         # Check if this is a new tag
         is_new_tag = tag_mac not in self._known_tags
 
@@ -1054,36 +1078,61 @@ class Hub:
             # Notify that this tag has been removed
             async_dispatcher_send(self.hass, f"{SIGNAL_TAG_UPDATE}_{tag_mac}")
 
-            # Remove related devices and entities
-            device_registry = dr.async_get(self.hass)
-            entity_registry = er.async_get(self.hass)
-
-            # Find and remove entities for this tag
-            entities_to_remove = []
-            devices_to_remove = set()
-
-            for entity in entity_registry.entities.values():
-                if entity.config_entry_id == self.entry.entry_id:
-                    device = device_registry.async_get(entity.device_id) if entity.device_id else None
-                    if device:
-                        for identifier in device.identifiers:
-                            if identifier[0] == DOMAIN and identifier[1] == tag_mac:
-                                entities_to_remove.append(entity.entity_id)
-                                devices_to_remove.add(device.id)
-                                break
-
-            # Remove entities
-            for entity_id in entities_to_remove:
-                entity_registry.async_remove(entity_id)
-                _LOGGER.debug(f"Removed entity {entity_id} for deleted tag {tag_mac}")
-
-            # Remove devices
-            for device_id in devices_to_remove:
-                device_registry.async_remove_device(device_id)
-                _LOGGER.debug(f"Removed device {device_id} for deleted tag {tag_mac}")
+            self._remove_tag_devices(tag_mac)
 
             # Update storage
             await self._store.async_save({"tags": self._data})
+
+    async def _hide_tag(self, tag_mac: str) -> None:
+        """Remove a tag that is filtered out by its content mode from HA.
+
+        Unlike _remove_tag, the tag still exists on the AP. It comes back
+        through normal discovery when its content mode changes or the
+        filter is disabled.
+
+        Args:
+            tag_mac: The MAC address of the tag to hide.
+        """
+        self._known_tags.discard(tag_mac)
+        self._data.pop(tag_mac, None)
+        async_dispatcher_send(self.hass, f"{SIGNAL_TAG_UPDATE}_{tag_mac}")
+        self._remove_tag_devices(tag_mac)
+        # Lets platforms forget the tag, so it can be added again later
+        async_dispatcher_send(self.hass, f"{DOMAIN}_blacklist_update")
+        await self._store.async_save({"tags": self._data})
+
+    def _remove_tag_devices(self, tag_mac: str) -> None:
+        """Remove the devices and entities of a tag from the registries.
+
+        Args:
+            tag_mac: The MAC address of the tag.
+        """
+        device_registry = dr.async_get(self.hass)
+        entity_registry = er.async_get(self.hass)
+
+        # Find and remove entities for this tag
+        entities_to_remove = []
+        devices_to_remove = set()
+
+        for entity in entity_registry.entities.values():
+            if entity.config_entry_id == self.entry.entry_id:
+                device = device_registry.async_get(entity.device_id) if entity.device_id else None
+                if device:
+                    for identifier in device.identifiers:
+                        if identifier[0] == DOMAIN and identifier[1] == tag_mac:
+                            entities_to_remove.append(entity.entity_id)
+                            devices_to_remove.add(device.id)
+                            break
+
+        # Remove entities
+        for entity_id in entities_to_remove:
+            entity_registry.async_remove(entity_id)
+            _LOGGER.debug(f"Removed entity {entity_id} for tag {tag_mac}")
+
+        # Remove devices
+        for device_id in devices_to_remove:
+            device_registry.async_remove_device(device_id)
+            _LOGGER.debug(f"Removed device {device_id} for tag {tag_mac}")
 
     async def async_reload_blacklist(self) -> None:
         """Reload the tag blacklist from config entry options.
@@ -1125,6 +1174,37 @@ class Hub:
             await self._store.async_save({
                 "tags": self._data
             })
+
+    def _is_hidden_by_content_mode(self, content_mode: int | None, hw_type: int | None) -> bool:
+        """Return True if the content filter hides a tag with this content mode.
+
+        Tags without a content mode and displays built into the AP are
+        never hidden.
+        """
+        return (
+            self._hide_oepl_content_tags
+            and content_mode is not None
+            and content_mode not in HA_CONTENT_MODES
+            and hw_type not in AP_DISPLAY_HW_TYPES
+        )
+
+    async def async_reload_content_filter(self) -> None:
+        """Re-apply the content mode filter after the option was toggled.
+
+        Reloads all tags from the AP: tags that are now filtered out get
+        removed from HA, and tags that are no longer filtered out get
+        rediscovered.
+        """
+        hide = self.entry.options.get("hide_oepl_content_tags", False)
+        if hide == self._hide_oepl_content_tags:
+            return
+
+        self._hide_oepl_content_tags = hide
+        self._content_filtered_tags.clear()
+        try:
+            await self.async_load_all_tags()
+        except Exception:  # already logged by async_load_all_tags
+            _LOGGER.warning("Content filter will be applied when tags check in")
 
     async def _handle_ap_config_message(self,dict) -> None:
         """Handle AP configuration updates.
@@ -1361,12 +1441,23 @@ class Hub:
         """Return the list of blacklisted tag MAC addresses.
 
         Blacklisted tags are known to the AP but ignored by Home Assistant.
-        This is configured through the integration's options flow.
+        This includes tags hidden by the content mode filter. Both are
+        configured through the integration's options flow.
 
         Returns:
             list[str]: List of blacklisted tag MAC addresses
         """
-        return self._blacklisted_tags
+        if not self._content_filtered_tags:
+            return self._blacklisted_tags
+        return [*self._blacklisted_tags, *self._content_filtered_tags]
+
+    def get_content_filtered_tags(self) -> list[str]:
+        """Return the MAC addresses of tags hidden by the content mode filter.
+
+        Returns:
+            list[str]: List of tag MAC addresses hidden because of their content mode
+        """
+        return list(self._content_filtered_tags)
 
     @property
     def ap_status(self) -> dict:

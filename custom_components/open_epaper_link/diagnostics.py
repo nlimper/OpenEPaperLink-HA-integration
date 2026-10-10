@@ -91,6 +91,7 @@ async def async_get_config_entry_diagnostics(
         diag["tags"] = {
             "count": len(hub.tags),
             "blacklisted_count": len(hub.get_blacklisted_tags()),
+            "content_filtered_count": len(hub.get_content_filtered_tags()),
             "data": _redact_tag_data({
                 mac: hub.get_tag_data(mac) for mac in hub.tags
             }),

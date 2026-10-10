@@ -133,6 +133,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: OpenEPaperLinkConfigEntr
         device_registry = dr.async_get(hass)
         entity_registry = er.async_get(hass)
 
+        # Forget blacklisted tags so their buttons are added again
+        # when they come back
+        added_tags.difference_update(hub.get_blacklisted_tags())
+
         # Track which devices need to be removed
         devices_to_remove = set()
 

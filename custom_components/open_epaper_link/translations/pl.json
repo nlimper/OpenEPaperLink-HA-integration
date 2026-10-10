@@ -47,12 +47,14 @@
         "description": "Wybierz tagi do umieszczenia na czarnej liście. Tagi z listy będą ukryte i ignorowane.",
         "data": {
           "blacklisted_tags": "Czarna lista tagów",
+          "hide_oepl_content_tags": "Ukryj tagi z treścią OEPL",
           "button_debounce": "Opóźnienie przycisku (sekundy)",
           "nfc_debounce": "Opóźnienie NFC (sekundy)",
           "custom_font_dirs": "Niestandardowe katalogi czcionek"
         },
         "data_description": {
           "blacklisted_tags": "Tagi do ukrycia; tagi na czarnej liście nie będą aktualizowane ani wywoływały usług.",
+          "hide_oepl_content_tags": "Pokazuj tylko tagi z typem treści Home Assistant, Obraz statyczny lub Nieskonfigurowany. Tagi z innymi typami treści nie są dodawane do Home Assistant.",
           "button_debounce": "Opóźnienie przed przyjęciem kolejnego naciśnięcia przycisku (sekundy).",
           "nfc_debounce": "Opóźnienie przed przyjęciem kolejnego odczytu NFC (sekundy).",
           "custom_font_dirs": "Katalogi z dodatkowymi czcionkami do generowanych obrazów (oddzielone przecinkami)."

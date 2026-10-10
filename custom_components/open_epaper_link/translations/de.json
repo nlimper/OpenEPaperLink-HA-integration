@@ -47,12 +47,14 @@
         "description": "Tags auswählen die ignoriert werden sollen.",
         "data": {
           "blacklisted_tags": "Ignorierte Tags",
+          "hide_oepl_content_tags": "Tags mit OEPL-Inhalt ausblenden",
           "button_debounce": "Tasten-Entstörzeit (Sekunden)",
           "nfc_debounce": "NFC-Entstörzeit (Sekunden)",
           "custom_font_dirs": "Benutzerdefinierte Schriftarten-Verzeichnisse"
         },
         "data_description": {
           "blacklisted_tags": "Tags ausblenden; geblacklistete Tags werden nicht aktualisiert und lösen keine Dienste aus.",
+          "hide_oepl_content_tags": "Nur Tags mit dem Inhaltstyp Home Assistant, Statisches Bild oder Nicht konfiguriert anzeigen. Tags mit anderen Inhaltstypen werden nicht zu Home Assistant hinzugefügt.",
           "button_debounce": "Wartezeit, bevor ein weiterer Tastendruck akzeptiert wird (Sekunden).",
           "nfc_debounce": "Wartezeit, bevor ein weiterer NFC-Tap akzeptiert wird (Sekunden).",
           "custom_font_dirs": "Kommagetrennte Verzeichnisse mit zusätzlichen Schriftarten für erzeugte Bilder."
