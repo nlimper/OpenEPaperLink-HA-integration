@@ -28,6 +28,21 @@ DITHER_DEFAULT = DITHER_ORDERED
 MAX_RETRIES = 3
 UPLOAD_TIMEOUT = 30  # seconds, per connect/read on the AP
 INITIAL_BACKOFF = 2  # seconds
+BUSY_DEFAULT_WAIT = 5  # seconds, when a 409 from the AP has no Retry-After header
+BUSY_MAX_WAIT = 60  # seconds of waiting on 409 responses before giving up
+
+
+def busy_wait_seconds(response: requests.Response) -> int:
+    """Seconds to wait before retrying after a 409 ("come back later") from the AP.
+
+    The AP answers 409 while it starts up, and with Retry-After when it has no
+    room for another upload at the moment.
+    """
+    try:
+        wait = int(response.headers.get("Retry-After", BUSY_DEFAULT_WAIT))
+    except ValueError:
+        wait = BUSY_DEFAULT_WAIT
+    return min(max(wait, 1), BUSY_MAX_WAIT)
 
 
 def image_to_jpeg_bytes(image: Image.Image, quality: int | str = 95) -> bytes:
@@ -227,7 +242,8 @@ async def upload_to_hub(hub, entity_id: str, img: Image.Image, dither: int, ttl:
     multipart/form-data POST request. Configures display parameters
     such as dithering, TTL, and optional preloading.
 
-    Will retry upload on timeout, with increasing backoff times
+    Will retry upload on timeout, with increasing backoff times, and when the AP
+    answers 409 ("come back later"), after the time it asks for in Retry-After
 
     Args:
         hub: Hub instance with connection details
@@ -254,8 +270,10 @@ async def upload_to_hub(hub, entity_id: str, img: Image.Image, dither: int, ttl:
     jpeg_bytes = await hub.hass.async_add_executor_job(image_to_jpeg_bytes, img, "maximum")
 
     backoff_delay = INITIAL_BACKOFF # Try up to MAX_RETRIES times to upload the image, retrying on TimeoutError.
+    timeouts = 0
+    busy_waited = 0
 
-    for attempt in range(1, MAX_RETRIES + 1):
+    while True:
         try:
 
             # Create a new MultipartEncoder for each attempt
@@ -289,19 +307,12 @@ async def upload_to_hub(hub, entity_id: str, img: Image.Image, dither: int, ttl:
                 )
             )
 
-            if response.status_code != 200:
-                raise HomeAssistantError(
-                    translation_domain=DOMAIN,
-                    translation_key="image_upload_status",
-                    translation_placeholders={"entity_id": entity_id, "status_code": response.status_code}
-                )
-            break
-
         except (asyncio.TimeoutError, requests.exceptions.Timeout):
-            if attempt < MAX_RETRIES:
+            timeouts += 1
+            if timeouts < MAX_RETRIES:
                 _LOGGER.warning(
                     "Timeout uploading %s (attempt %d/%d), retrying in %ds…",
-                    entity_id, attempt, MAX_RETRIES, backoff_delay
+                    entity_id, timeouts, MAX_RETRIES, backoff_delay
                 )
                 await asyncio.sleep(backoff_delay)
                 backoff_delay *= 2
@@ -325,6 +336,22 @@ async def upload_to_hub(hub, entity_id: str, img: Image.Image, dither: int, ttl:
                 translation_key="image_upload_failed",
                 translation_placeholders={"entity_id": entity_id, "error": str(err)}
             ) from err
+
+        if response.status_code == 409:
+            wait = busy_wait_seconds(response)
+            if busy_waited + wait <= BUSY_MAX_WAIT:
+                _LOGGER.info("AP busy uploading %s (%s), retrying in %ds", entity_id, response.text.strip(), wait)
+                await asyncio.sleep(wait)
+                busy_waited += wait
+                continue
+
+        if response.status_code != 200:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="image_upload_status",
+                translation_placeholders={"entity_id": entity_id, "status_code": response.status_code}
+            )
+        return
 
 
 async def upload_to_ble_block(hass: HomeAssistant, entity_id: str, img: bytes, dither: int = 2) -> None:
