@@ -131,7 +131,7 @@ Custom fonts are supported for text elements. The integration provides several w
 The integration searches for fonts in these locations in order:
 
 1. **Custom font directories** (configured in the integration options)
-2. **Integration assets directory** (`custom_components/open_epaper_link/imagegen/assets`) - contains default fonts (`ppb.ttf`, `rbm.ttf`)
+2. **Integration assets directory** (`custom_components/open_epaper_link/imagegen/assets`) - contains the bundled fonts (`ppb.ttf`, `rbm.ttf`, `wine_tahoma.ttf`)
 3. **Web directory** - (`/config/www/fonts/`)
 4. **Media directory** - (`/media/fonts/`)
 
@@ -156,11 +156,16 @@ You can access these directories:
 
 ### Default fonts
 
-The integration provides two default fonts:
-- `ppb.ttf`
-- `rbm.ttf`
+The integration provides these fonts:
+- `ppb.ttf` (Poppins Bold), the default font
+- `rbm.ttf` (Roboto Medium)
+- `wine_tahoma.ttf` (Wine Tahoma, a free Tahoma lookalike from the Wine project, LGPL 2.1)
 
-These are always available and will be used as fallbacks if specified fonts cannot be found.
+`ppb.ttf` and `rbm.ttf` are used as fallbacks if a specified font cannot be found.
+
+E-paper text is drawn without anti-aliasing, and at small sizes Poppins and Roboto lose detail (uneven stroke weights, `5` that looks like `6`). For text below about 16 px, `wine_tahoma.ttf` is usually more legible: it contains hand-drawn pixel versions of its glyphs for 8 to 13, 15 and 16 px. With `stroke_width` the outlines are used instead.
+
+> **Note:** Fonts in the integration assets directory are found before fonts in `/config/www/fonts/` and `/media/fonts/`, which is why the Wine font is called `wine_tahoma.ttf` and not `tahoma.ttf`.
 
 ### Configuring custom font directories
 
@@ -227,7 +232,7 @@ Draws text.
 | `x`            | X position                           | Yes      | -                              | Pixels or percentage                                                                      |
 | `y`            | Y position                           | No       | Last text position + y_padding | Pixels or percentage                                                                      |
 | `size`         | Font size                            | No       | `20`                           | Pixels                                                                                    |
-| `font`         | Font file name                       | No       | `ppb.ttf`                      | Available fonts: `ppb.ttf`, `rbm.ttf`, or custom                                          |
+| `font`         | Font file name                       | No       | `ppb.ttf`                      | Available fonts: `ppb.ttf`, `rbm.ttf`, `wine_tahoma.ttf`, or custom                       |
 | `color`        | Text color                           | No       | `black`                        | `black`, `white`, `red`,`yellow`                                                          |
 | `anchor`       | Text anchor point                    | No       | `lt` (left-top)                | [Pillow text anchors](https://pillow.readthedocs.io/en/stable/handbook/text-anchors.html) |
 | `max_width`    | Maximum text width before wrapping   | No       | -                              | Pixels or percentage                                                                      |
@@ -330,7 +335,7 @@ Splits text into multiple lines based on a delimiter.
 | `offset_y`  | Vertical spacing between lines | Yes      | -                         | Pixels                                      |
 | `y`         | Starting Y position            | No       | Last position + y_padding | Pixels or percentage                        |
 | `size`      | Font size                      | No       | `20`                      | Pixels                                      |
-| `font`      | Font file name                 | No       | `ppb.ttf`                 | Available fonts: `ppb.ttf`, `rbm.ttf`       |
+| `font`      | Font file name                 | No       | `ppb.ttf`                 | Available fonts: `ppb.ttf`, `rbm.ttf`, `wine_tahoma.ttf` |
 | `color`     | Text color                     | No       | `black`                   | `white`, `black`, `accent`, `red`, `yellow` |
 | `spacing`   | Additional line spacing        | No       | `0`                       | Pixels                                      |
 | `visible`   | Show/hide element              | No       | `true`                    | `true`, `false`                             |
